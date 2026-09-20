@@ -48,6 +48,24 @@ usage() {
 EOF
 }
 
+# ------------------------------------------------------------------------------
+# 対話 UI 関数
+# ------------------------------------------------------------------------------
+choose_action() {
+  echo "行いたい処理を選択してください:"
+  select action in \
+    "Prompt 生成" \
+    "Git push" \
+    "Git pull" \
+    "Project summary" \
+    "終了"; do
+    case "$REPLY" in
+      1) ACTION="prompt"; break ;;
+      2) ACTION="git_push"; break ;;
+      3) ACTION="git_pull"; break ;;
+      4) ACTION="summary"; break ;;
+      5) exit 0 ;;
+      *) echo "無効な選択です。番号で選んでください。" ;;
 parse_args() {
   while (($# > 0)); do
     case "$1" in
@@ -94,6 +112,8 @@ get_prompt_instruction() {
       echo "以下はプロジェクトのファイル群とディレクトリ構成です。まずプロジェクト種別、技術スタック、主要な構成要素を推定してください。不明な点は推測であることを明示し、確認すべきファイルや質問を挙げてください。そのうえで、次の開発・分析に役立つ実践的なフィードバックを提示してください。"
       ;;
     *)
+      echo "テンプレートのマッピングが見つかりません：ACTION=${ACTION} PROMPT_MODE=${PROMPT_MODE}" >&2
+      exit 1
       echo "上記コードを解析し、適切なフィードバックを提示してください。"
       ;;
   esac
@@ -223,6 +243,36 @@ choose_prompt_mode() {
     "コードレビュー依頼" \
     "プロジェクト構成の要約"; do
     case "$REPLY" in
+  echo "プロジェクト種別を選択してください:"
+  select project_type in \
+    "Swift" \
+    "Ruby" \
+    "Python" \
+    "Ren'Py" \
+    "Web (JS/TS)" \
+    "KMP (Kotlin Multiplatform)" \
+    "その他テキスト中心"; do
+    case "$REPLY" in
+      1) PROJECT_TYPE="swift"; break ;;
+      2) PROJECT_TYPE="ruby"; break ;;
+      3) PROJECT_TYPE="python"; break ;;
+      4) PROJECT_TYPE="renpy"; break ;;
+      5) PROJECT_TYPE="web"; break ;;
+      6) PROJECT_TYPE="kmp"; break ;;
+      7) PROJECT_TYPE="text"; break ;;
+
+  if [[ "$PROJECT_TYPE" == "generic" ]]; then
+    PROMPT_MODE="generic"
+    echo "🎯 汎用プロジェクト分析モードを自動選択しました。"
+    return
+  fi
+
+  echo "🎯 AIへの主な依頼内容（モード）を選択してください:"
+  select pm in \
+    "エラー・バグの修正依頼" \
+    "コードレビュー依頼" \
+    "プロジェクト構成の要約"; do
+    case "$REPLY" in
       1) PROMPT_MODE="fix"; break ;;
       2) PROMPT_MODE="review"; break ;;
       3) PROMPT_MODE="summary"; break ;;
@@ -231,6 +281,69 @@ choose_prompt_mode() {
   done
 }
 
+# ============================================================================== 
+# 検索ルール構築（ripgrep / find）
+# ============================================================================== 
+add_common_excludes() {
+  RG_ARGS+=(
+choose_output_file() {
+  echo
+  read -r -p "出力ファイル名を入力してください（Enter でデフォルト）: " input_out
+  if [[ -n "${input_out:-}" ]]; then
+    OUT="$input_out"
+  else
+    case "${ACTION}:${PROMPT_MODE}" in
+      prompt:fix) OUT="combined-prompt-fix.txt" ;;
+      prompt:summary) OUT="combined-prompt-summary.txt" ;;
+      prompt:review) OUT="combined-prompt-review.txt" ;;
+      summary:*) OUT="combined-project-summary.txt" ;;
+      *) OUT="combined-project-light.txt" ;;
+    esac
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# 検索ルール構築 (ripgrep)
+# ------------------------------------------------------------------------------
+add_common_excludes() {
+  RG_ARGS+=(
+    -g '!**/.git/**'
+    -g '!**/node_modules/**'
+    -g '!**/DerivedData/**'
+    -g '!**/.build/**'
+    -g '!**/build/**'
+    -g '!**/dist/**'
+    -g '!**/coverage/**'
+    -g '!**/Pods/**'
+    -g '!**/Carthage/**'
+    -g '!**/SourcePackages/**'
+    -g '!**/vendor/bundle/**'
+    -g '!**/.venv/**'
+    -g '!**/venv/**'
+    -g '!**/__pycache__/**'
+    -g '!**/.pytest_cache/**'
+    -g '!**/.mypy_cache/**'
+    -g '!**/.idea/**'
+    -g '!**/.vscode/**'
+    -g '!**/xcuserdata/**'
+    -g '!**/*.xcuserstate'
+    -g '!**/*.png'
+    -g '!**/*.jpg'
+    -g '!**/*.jpeg'
+    -g '!**/*.gif'
+    -g '!**/*.webp'
+    -g '!**/*.pdf'
+    -g '!**/*.zip'
+    -g '!**/*.mp3'
+    -g '!**/*.mp4'
+    -g '!**/*.mov'
+    -g '!**/*.rpyc'
+    -g '!**/*.pyc'
+    -g '!**/*.class'
+    -g '!**/*.jar'
+    -g '!**/*.so'
+    -g '!**/*.dylib'
+    -g '!**/*.dll'
 # ============================================================================== 
 # 検索ルール構築（ripgrep / find）
 # ============================================================================== 
@@ -261,6 +374,36 @@ add_project_globs() {
     wordpress)
       RG_ARGS+=( -g '*.php' -g '*.html' -g '*.css' -g '*.js' -g '*.json' -g '*.yml' -g '*.yaml' -g '*.md' )
       ;;
+    kmp)
+      RG_ARGS+=(
+        # Kotlin ソース
+        -g '*.kt' -g '*.kts'
+        # Gradle 設定
+        -g 'build.gradle.kts' -g 'settings.gradle.kts'
+        -g 'build.gradle' -g 'settings.gradle'
+        -g 'gradle.properties' -g 'local.properties'
+        # Gradle wrapper
+        -g 'gradlew' -g 'gradlew.bat'
+        -g 'gradle/wrapper/gradle-wrapper.properties'
+        # KMP 固有
+        -g 'composeResources/**/*'
+        # 設定・ドキュメント
+        -g '*.md' -g '*.json' -g '*.yml' -g '*.yaml'
+        -g '*.toml' -g '*.properties'
+        # ProGuard/R8
+        -g 'proguard-rules.pro'
+        # Android 固有（共有モジュールが参照する可能性）
+        -g 'AndroidManifest.xml'
+        # iOS 連携（KMP から Swift を呼ぶ場合など）
+        -g '*.swift' -g '*.h'
+      )
+      ;;
+    web_frontend)
+      RG_ARGS+=( -g '*.js' -g '*.ts' -g '*.tsx' -g '*.jsx' -g '*.css' -g '*.scss' -g '*.html' -g '*.json' -g '*.md' )
+      ;;
+    *)
+      echo "未知のプロジェクト種別です：$PROJECT_TYPE" >&2
+      exit 1
     web_frontend)
       RG_ARGS+=( -g '*.js' -g '*.ts' -g '*.tsx' -g '*.jsx' -g '*.css' -g '*.scss' -g '*.html' -g '*.json' -g '*.md' )
       ;;
@@ -287,6 +430,118 @@ get_file_list() {
     add_common_excludes
     rg --files "${RG_ARGS[@]}" .
   else
+    # ripgrep がない場合の簡易フォールバック。
+    find . -type f \
+      ! -path './.git/*' \
+      ! -path './node_modules/*' \
+      ! -path './DerivedData/*' \
+      ! -path './build/*' \
+      ! -path './dist/*' \
+      ! -path './.venv/*' \
+      ! -path './venv/*' \
+      ! -name "$OUT_FILE" \
+      ! -name '.env' \
+      ! -name '.env.*' \
+      ! -name 'wp-config.php'
+  fi
+}
+
+    echo "注意：'rg' (ripgrep) が見つからないため 'find' コマンドで代用します。" >&2
+    find . -type f \
+      ! -path '*/.*' \
+      ! -path '*/node_modules/*' \
+      ! -path '*/venv/*' \
+      ! -path '*/.venv/*' \
+      ! -path '*/DerivedData/*' \
+      ! -path '*/build/*' \
+      ! -path '*/dist/*' \
+      ! -path '*/.build/*' \
+      ! -path '*/.gradle/*' \
+      ! -name '*.class' \
+      ! -name '*.jar' \
+      ! -name '*.so' \
+      ! -name '*.dylib' \
+      ! -name '*.dll'
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# メイン処理フロー
+# ------------------------------------------------------------------------------
+collect_files() {
+  {
+    echo "===== PROJECT TYPE ====="
+    echo "$PROJECT_TYPE"
+    echo
+    echo "===== PROJECT ROOT ====="
+    pwd
+    echo
+  } > "$OUT"
+
+  while IFS= read -r file; do
+    printf '\n\n===== FILE: %s =====\n\n' "$file"
+    cat "$file"
+  done < <(get_file_list) >> "$OUT"
+}
+
+append_template() {
+  printf '\n\n===== PROMPT TEMPLATE =====\n\n' >> "$OUT"
+
+  if [[ -f "$PROMPT_TEMPLATE" ]]; then
+    cat "$PROMPT_TEMPLATE" >> "$OUT"
+  else
+    echo "注意：テンプレートファイルが見つかりません ($PROMPT_TEMPLATE)" >&2
+    echo "デフォルトの指示文を出力に追加します。" >&2
+    case "$PROMPT_MODE" in
+      fix)
+        echo "上記コードに関するエラーを特定し、修正案と原因の解説を提示してください。" >> "$OUT"
+        ;;
+      summary)
+        echo "上記プロジェクトの全体構成と各ファイルの役割を分かりやすく要約してください。" >> "$OUT"
+        ;;
+      review)
+        echo "上記コードの可読性・パフォーマンス・安全性・ベストプラクティスの観点からコードレビューを行ってください。" >> "$OUT"
+        ;;
+      *)
+        echo "上記コードを解析し、適切なフィードバックを提示してください。" >> "$OUT"
+        ;;
+    esac
+  fi
+}
+
+generate_prompt() {
+  choose_prompt_mode
+  choose_project_type
+  choose_output_file
+  set_template_by_action
+
+  collect_files
+  append_template
+
+  echo
+  echo "出力完了：$OUT"
+}
+
+git_push_flow() {
+  require_command git
+  ensure_git_repo
+  set_template_by_action
+
+  echo
+  echo "現在のディレクトリ：$(pwd)"
+  echo
+  git status --short
+
+  if [[ -z "$(git status --porcelain)" ]]; then
+    echo
+    echo "変更がありません。Git push を中止します。"
+    exit 0
+  fi
+
+  echo
+  read -r -p "コミットメッセージを入力してください：" commit_msg
+  if [[ -z "${commit_msg:-}" ]]; then
+    echo "エラー：コミットメッセージが空です。" >&2
     # ripgrep がない場合の簡易フォールバック。
     find . -type f \
       ! -path './.git/*' \
@@ -342,6 +597,16 @@ generate_output() {
   local file
 
   echo
+  echo "現在のディレクトリ：$(pwd)"
+  git pull
+
+  echo
+  echo "Git pull が完了しました。"
+}
+
+project_summary_flow() {
+  choose_project_type
+  choose_output_file
   echo "⏳ プロジェクトファイルを収集・結合しています..."
 
   {
@@ -357,6 +622,8 @@ generate_output() {
     echo "<files>"
   } > "$OUT_FILE"
 
+  echo
+  echo "出力完了：$OUT"
   for file in "${FILE_LIST[@]}"; do
     if [[ ! -f "$file" || ! -r "$file" ]]; then
       printf '%s: エラー: 読み取り可能なファイルではありません: %s\n' \
@@ -414,6 +681,9 @@ show_suggestions() {
       echo " このプロジェクトに新しく参画する開発者向けに、"
       echo " 全体像とディレクトリ構成の役割を分かりやすく解説してください。」"
       ;;
+    *)
+      echo "不明なアクションです：$ACTION" >&2
+      exit 1
     generic)
       echo "「クリップボードのファイル群を読み込んでください。"
       echo " まずプロジェクト種別・技術スタック・ディレクトリ構成を推定し、"
