@@ -68,12 +68,12 @@ ensure_git_repo() {
 }
 
 # ------------------------------------------------------------------------------
-# 対話UI関数
+# 対話 UI 関数
 # ------------------------------------------------------------------------------
 choose_action() {
   echo "行いたい処理を選択してください:"
   select action in \
-    "Prompt生成" \
+    "Prompt 生成" \
     "Git push" \
     "Git pull" \
     "Project summary" \
@@ -120,7 +120,7 @@ set_template_by_action() {
       PROMPT_TEMPLATE="$TEMPLATE_GIT_PUSH"
       ;;
     *)
-      echo "テンプレートのマッピングが見つかりません: ACTION=${ACTION} PROMPT_MODE=${PROMPT_MODE}" >&2
+      echo "テンプレートのマッピングが見つかりません：ACTION=${ACTION} PROMPT_MODE=${PROMPT_MODE}" >&2
       exit 1
       ;;
   esac
@@ -135,6 +135,7 @@ choose_project_type() {
     "Python" \
     "Ren'Py" \
     "Web (JS/TS)" \
+    "KMP (Kotlin Multiplatform)" \
     "その他テキスト中心"; do
     case "$REPLY" in
       1) PROJECT_TYPE="swift"; break ;;
@@ -142,7 +143,8 @@ choose_project_type() {
       3) PROJECT_TYPE="python"; break ;;
       4) PROJECT_TYPE="renpy"; break ;;
       5) PROJECT_TYPE="web"; break ;;
-      6) PROJECT_TYPE="text"; break ;;
+      6) PROJECT_TYPE="kmp"; break ;;
+      7) PROJECT_TYPE="text"; break ;;
       *) echo "無効な選択です。番号で選んでください。" ;;
     esac
   done
@@ -150,7 +152,7 @@ choose_project_type() {
 
 choose_output_file() {
   echo
-  read -r -p "出力ファイル名を入力してください（Enterでデフォルト）: " input_out
+  read -r -p "出力ファイル名を入力してください（Enter でデフォルト）: " input_out
   if [[ -n "${input_out:-}" ]]; then
     OUT="$input_out"
   else
@@ -201,6 +203,11 @@ add_common_excludes() {
     -g '!**/*.mov'
     -g '!**/*.rpyc'
     -g '!**/*.pyc'
+    -g '!**/*.class'
+    -g '!**/*.jar'
+    -g '!**/*.so'
+    -g '!**/*.dylib'
+    -g '!**/*.dll'
   )
 }
 
@@ -243,6 +250,30 @@ add_project_globs() {
         -g 'tsconfig.json' -g 'vite.config.*' -g 'next.config.*'
       )
       ;;
+    kmp)
+      RG_ARGS+=(
+        # Kotlin ソース
+        -g '*.kt' -g '*.kts'
+        # Gradle 設定
+        -g 'build.gradle.kts' -g 'settings.gradle.kts'
+        -g 'build.gradle' -g 'settings.gradle'
+        -g 'gradle.properties' -g 'local.properties'
+        # Gradle wrapper
+        -g 'gradlew' -g 'gradlew.bat'
+        -g 'gradle/wrapper/gradle-wrapper.properties'
+        # KMP 固有
+        -g 'composeResources/**/*'
+        # 設定・ドキュメント
+        -g '*.md' -g '*.json' -g '*.yml' -g '*.yaml'
+        -g '*.toml' -g '*.properties'
+        # ProGuard/R8
+        -g 'proguard-rules.pro'
+        # Android 固有（共有モジュールが参照する可能性）
+        -g 'AndroidManifest.xml'
+        # iOS 連携（KMP から Swift を呼ぶ場合など）
+        -g '*.swift' -g '*.h'
+      )
+      ;;
     text)
       RG_ARGS+=(
         -g '*.txt' -g '*.md' -g '*.json'
@@ -250,7 +281,7 @@ add_project_globs() {
       )
       ;;
     *)
-      echo "未知のプロジェクト種別です: $PROJECT_TYPE" >&2
+      echo "未知のプロジェクト種別です：$PROJECT_TYPE" >&2
       exit 1
       ;;
   esac
@@ -267,7 +298,7 @@ get_file_list() {
     build_rg_args
     rg --files . "${RG_ARGS[@]}"
   else
-    echo "注意: 'rg' (ripgrep) が見つからないため 'find' コマンドで代用します。" >&2
+    echo "注意：'rg' (ripgrep) が見つからないため 'find' コマンドで代用します。" >&2
     find . -type f \
       ! -path '*/.*' \
       ! -path '*/node_modules/*' \
@@ -275,7 +306,14 @@ get_file_list() {
       ! -path '*/.venv/*' \
       ! -path '*/DerivedData/*' \
       ! -path '*/build/*' \
-      ! -path '*/dist/*'
+      ! -path '*/dist/*' \
+      ! -path '*/.build/*' \
+      ! -path '*/.gradle/*' \
+      ! -name '*.class' \
+      ! -name '*.jar' \
+      ! -name '*.so' \
+      ! -name '*.dylib' \
+      ! -name '*.dll'
   fi
 }
 
@@ -300,11 +338,11 @@ collect_files() {
 
 append_template() {
   printf '\n\n===== PROMPT TEMPLATE =====\n\n' >> "$OUT"
-  
+
   if [[ -f "$PROMPT_TEMPLATE" ]]; then
     cat "$PROMPT_TEMPLATE" >> "$OUT"
   else
-    echo "注意: テンプレートファイルが見つかりません ($PROMPT_TEMPLATE)" >&2
+    echo "注意：テンプレートファイルが見つかりません ($PROMPT_TEMPLATE)" >&2
     echo "デフォルトの指示文を出力に追加します。" >&2
     case "$PROMPT_MODE" in
       fix)
@@ -333,7 +371,7 @@ generate_prompt() {
   append_template
 
   echo
-  echo "出力完了: $OUT"
+  echo "出力完了：$OUT"
 }
 
 git_push_flow() {
@@ -342,7 +380,7 @@ git_push_flow() {
   set_template_by_action
 
   echo
-  echo "現在のディレクトリ: $(pwd)"
+  echo "現在のディレクトリ：$(pwd)"
   echo
   git status --short
 
@@ -353,9 +391,9 @@ git_push_flow() {
   fi
 
   echo
-  read -r -p "コミットメッセージを入力してください: " commit_msg
+  read -r -p "コミットメッセージを入力してください：" commit_msg
   if [[ -z "${commit_msg:-}" ]]; then
-    echo "エラー: コミットメッセージが空です。" >&2
+    echo "エラー：コミットメッセージが空です。" >&2
     exit 1
   fi
 
@@ -372,7 +410,7 @@ git_pull_flow() {
   ensure_git_repo
 
   echo
-  echo "現在のディレクトリ: $(pwd)"
+  echo "現在のディレクトリ：$(pwd)"
   git pull
 
   echo
@@ -395,7 +433,7 @@ project_summary_flow() {
   } > "$OUT"
 
   echo
-  echo "出力完了: $OUT"
+  echo "出力完了：$OUT"
 }
 
 main() {
@@ -416,7 +454,7 @@ main() {
       project_summary_flow
       ;;
     *)
-      echo "不明なアクションです: $ACTION" >&2
+      echo "不明なアクションです：$ACTION" >&2
       exit 1
       ;;
   esac
