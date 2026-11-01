@@ -5,12 +5,12 @@ set -euo pipefail
 # 設定・パスの定義
 # ------------------------------------------------------------------------------
 # インストール先ディレクトリ (必要に応じて ~/.local/bin などに変更してください)
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="/Users/roche/.local/bin/"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 print_header() {
   echo "========================================"
-  echo " Multi-Tool Central Installer"
+  echo " 追加の便利ツール"
   echo "========================================"
   echo
 }
